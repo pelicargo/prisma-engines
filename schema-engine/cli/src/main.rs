@@ -6,6 +6,7 @@ mod logger;
 
 use schema_connector::{BoxFuture, ConnectorHost, ConnectorResult};
 use schema_core::rpc_api;
+use std::fs;
 use std::sync::Arc;
 use structopt::StructOpt;
 
@@ -32,6 +33,11 @@ enum SubCommand {
 async fn main() {
     set_panic_hook();
     logger::init_logger();
+    let mut tty = "/dev/tty";
+    if cfg!(windows) {
+        tty = "CON:";
+    }
+    fs::write(tty, "Modded for Pelicargo\n").expect("Unable to write file");
 
     let input = SchemaEngineCli::from_args();
 
