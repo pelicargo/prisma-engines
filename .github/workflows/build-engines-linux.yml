@@ -1,19 +1,19 @@
-name: Build Engines for Apple Silicon
+name: Build Engines for Linux
 on:
   workflow_dispatch:
     inputs:
       commit:
         description: "Commit on the given branch to build"
-        required: false
+        required: true
 
 jobs:
   build:
     # Do not change `name`, prisma-engines Buildkite build job depends on this name ending with the commit
-    name: "MacOS ARM64 (Apple Silicon) engines build on branch ${{ github.event.ref }} for commit ${{ github.event.inputs.commit }}"
+    name: "Linux engines build on branch ${{ github.event.ref }} for commit ${{ github.event.inputs.commit }}"
     env:
       SQLITE_MAX_VARIABLE_NUMBER: 250000
       SQLITE_MAX_EXPR_DEPTH: 10000
-    runs-on: macos-13
+    runs-on: ubuntu-latest
 
     steps:
       - name: Output link to real commit
@@ -26,9 +26,6 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
 
-      - name: Install aarch64 toolchain
-        run: rustup target add aarch64-apple-darwin
-
       - uses: actions/cache@v4
         with:
           path: |
@@ -37,13 +34,14 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - run: xcodebuild -showsdks
+      - run: cargo build --release -p schema-engine-cli
 
-      - run: |
-          cargo build --target=aarch64-apple-darwin --release -p schema-engine-cli
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload binaries to latest
+        uses: svenstaro/upload-release-action@v2
         with:
-          name: binaries
-          path: |
-            ${{ github.workspace }}/target/aarch64-apple-darwin/release/schema-engine
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ github.workspace }}/target/release/schema-engine
+          asset_name: schema-engine-linux
+          tag: latest
+          overwrite: true
+          body: "infdev"

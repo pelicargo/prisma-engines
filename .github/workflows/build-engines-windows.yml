@@ -35,7 +35,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - run: cargo build --release
+      - run: cargo build --release -p schema-engine-cli
 
       - uses: actions/upload-artifact@v4
         with:

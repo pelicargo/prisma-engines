@@ -38,13 +38,10 @@ jobs:
           key: ${{ runner.os }}-intel-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - run: |
-          cargo build --release -p query-engine -p query-engine-node-api -p schema-engine-cli -p prisma-fmt
+          cargo build --release -p schema-engine-cli
 
       - uses: actions/upload-artifact@v4
         with:
           name: binaries
           path: |
             ${{ github.workspace }}/target/release/schema-engine
-            ${{ github.workspace }}/target/release/prisma-fmt
-            ${{ github.workspace }}/target/release/query-engine
-            ${{ github.workspace }}/target/release/libquery_engine.dylib
