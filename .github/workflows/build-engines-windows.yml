@@ -37,21 +37,12 @@ jobs:
 
       - run: cargo build --release -p schema-engine-cli
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: binaries
-          path: |
-            ${{ github.workspace }}/target/release/*.exe
-            ${{ github.workspace }}/target/release/*.dll
-
-      - run: Compress-Archive -Path ${{ github.workspace }}/target/release/ -Destination ${{ github.workspace }}/windows.zip
-
       - name: Upload binaries to latest
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ github.workspace }}/windows.zip
-          asset_name: schema-engine-windows.zip
+          file: ${{ github.workspace }}/target/release/schema-engine.exe
+          asset_name: schema-engine-windows.exe
           tag: latest
           overwrite: true
           body: "infdev"
