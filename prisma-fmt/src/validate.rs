@@ -29,7 +29,8 @@ pub(crate) fn validate(params: &str) -> Result<(), String> {
 }
 
 pub fn run(input_schema: SchemaFileInput, no_color: bool) -> Result<ValidatedSchema, String> {
-    let validate_schema = psl::validate_multi_file(input_schema.into());
+    let sources: Vec<(String, psl::SourceFile)> = input_schema.into();
+    let validate_schema = psl::validate_multi_file(&sources);
     let diagnostics = &validate_schema.diagnostics;
 
     if !diagnostics.has_errors() {
@@ -183,7 +184,7 @@ mod tests {
         });
 
         let expected = expect![[
-            r#"{"error_code":"P1012","message":"\u001b[1;91merror\u001b[0m: \u001b[1mError parsing attribute \"@relation\": The relation field `a` on Model `B` is required. This is no longer valid because it's not possible to enforce this constraint on the database level. Please change the field type from `A` to `A?` to fix this.\u001b[0m\n  \u001b[1;94m-->\u001b[0m  \u001b[4mb.prisma:4\u001b[0m\n\u001b[1;94m   | \u001b[0m\n\u001b[1;94m 3 | \u001b[0m                    id String @id\n\u001b[1;94m 4 | \u001b[0m                    \u001b[1;91ma A\u001b[0m\n\u001b[1;94m 5 | \u001b[0m                }\n\u001b[1;94m   | \u001b[0m\n\nValidation Error Count: 1"}"#
+            r#"{"error_code":"P1012","message":"\u001b[1;91merror\u001b[0m: \u001b[1mError parsing attribute \"@relation\": The relation field `a` on Model `B` is required. This is not valid because it's not possible to enforce this constraint on the database level. Please change the field type from `A` to `A?` to fix this.\u001b[0m\n  \u001b[1;94m-->\u001b[0m  \u001b[4mb.prisma:4\u001b[0m\n\u001b[1;94m   | \u001b[0m\n\u001b[1;94m 3 | \u001b[0m                    id String @id\n\u001b[1;94m 4 | \u001b[0m                    \u001b[1;91ma A\u001b[0m\n\u001b[1;94m 5 | \u001b[0m                }\n\u001b[1;94m   | \u001b[0m\n\nValidation Error Count: 1"}"#
         ]];
 
         let response = validate(&request.to_string()).unwrap_err();

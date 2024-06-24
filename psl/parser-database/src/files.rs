@@ -11,14 +11,14 @@ pub struct Files(pub Vec<(String, schema_ast::SourceFile, ast::SchemaAst)>);
 
 impl Files {
     /// Create a new Files instance from multiple files.
-    pub fn new(files: Vec<(String, schema_ast::SourceFile)>, diagnostics: &mut Diagnostics) -> Self {
+    pub fn new(files: &[(String, schema_ast::SourceFile)], diagnostics: &mut Diagnostics) -> Self {
         let asts = files
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(file_idx, (path, source))| {
                 let id = FileId(file_idx as u32);
                 let ast = schema_ast::parse_schema(source.as_str(), diagnostics, id);
-                (path, source, ast)
+                (path.to_owned(), source.clone(), ast)
             })
             .collect();
         Self(asts)
@@ -53,6 +53,12 @@ impl Files {
         }
 
         String::from_utf8(out).unwrap()
+    }
+
+    /// Returns the number of files.
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 }
 

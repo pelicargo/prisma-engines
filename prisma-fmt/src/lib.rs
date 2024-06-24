@@ -5,21 +5,57 @@ mod get_dmmf;
 mod lint;
 mod merge_schemas;
 mod native;
+mod offsets;
 mod preview;
 mod schema_file_input;
 mod text_document_completion;
 mod validate;
 
 use log::*;
-use lsp_types::{Position, Range};
-use psl::parser_database::ast;
+pub use offsets::span_to_range;
+use psl::{
+    datamodel_connector::Connector, diagnostics::FileId, parser_database::ParserDatabase, Configuration, Datasource,
+    Generator,
+};
 use schema_file_input::SchemaFileInput;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LSPContext<'a, T> {
+    pub(crate) db: &'a ParserDatabase,
+    pub(crate) config: &'a Configuration,
+    pub(crate) initiating_file_id: FileId,
+    pub(crate) params: &'a T,
+}
+
+impl<'a, T> LSPContext<'a, T> {
+    pub(crate) fn initiating_file_source(&self) -> &str {
+        self.db.source(self.initiating_file_id)
+    }
+
+    pub(crate) fn initiating_file_uri(&self) -> &str {
+        self.db.file_name(self.initiating_file_id)
+    }
+
+    pub(crate) fn datasource(&self) -> Option<&Datasource> {
+        self.config.datasources.first()
+    }
+
+    pub(crate) fn connector(&self) -> &'static dyn Connector {
+        self.datasource()
+            .map(|ds| ds.active_connector)
+            .unwrap_or(&psl::datamodel_connector::EmptyDatamodelConnector)
+    }
+
+    pub(crate) fn generator(&self) -> Option<&'a Generator> {
+        self.config.generators.first()
+    }
+}
 
 /// The API is modelled on an LSP [completion
 /// request](https://github.com/microsoft/language-server-protocol/blob/gh-pages/_specifications/specification-3-16.md#textDocument_completion).
 /// Input and output are both JSON, the request being a `CompletionParams` object and the response
 /// being a `CompletionList` object.
-pub fn text_document_completion(schema: String, params: &str) -> String {
+pub fn text_document_completion(schema_files: String, params: &str) -> String {
     let params = if let Ok(params) = serde_json::from_str::<lsp_types::CompletionParams>(params) {
         params
     } else {
@@ -27,13 +63,18 @@ pub fn text_document_completion(schema: String, params: &str) -> String {
         return serde_json::to_string(&text_document_completion::empty_completion_list()).unwrap();
     };
 
-    let completion_list = text_document_completion::completion(schema, params);
+    let Ok(input) = serde_json::from_str::<SchemaFileInput>(&schema_files) else {
+        warn!("Failed to parse schema file input");
+        return serde_json::to_string(&text_document_completion::empty_completion_list()).unwrap();
+    };
+
+    let completion_list = text_document_completion::completion(input.into(), params);
 
     serde_json::to_string(&completion_list).unwrap()
 }
 
 /// This API is modelled on an LSP [code action request](https://github.com/microsoft/language-server-protocol/blob/gh-pages/_specifications/specification-3-16.md#textDocument_codeAction=). Input and output are both JSON, the request being a `CodeActionParams` object and the response being a list of `CodeActionOrCommand` objects.
-pub fn code_actions(schema: String, params: &str) -> String {
+pub fn code_actions(schema_files: String, params: &str) -> String {
     let params = if let Ok(params) = serde_json::from_str::<lsp_types::CodeActionParams>(params) {
         params
     } else {
@@ -41,7 +82,12 @@ pub fn code_actions(schema: String, params: &str) -> String {
         return serde_json::to_string(&code_actions::empty_code_actions()).unwrap();
     };
 
-    let actions = code_actions::available_actions(schema, params);
+    let Ok(input) = serde_json::from_str::<SchemaFileInput>(&schema_files) else {
+        warn!("Failed to parse schema file input");
+        return serde_json::to_string(&text_document_completion::empty_completion_list()).unwrap();
+    };
+
+    let actions = code_actions::available_actions(input.into(), params);
     serde_json::to_string(&actions).unwrap()
 }
 
@@ -122,8 +168,8 @@ pub fn merge_schemas(params: String) -> Result<String, String> {
     merge_schemas::merge_schemas(&params)
 }
 
-pub fn native_types(schema: String) -> String {
-    native::run(&schema)
+pub fn native_types(input: String) -> String {
+    native::run(&input)
 }
 
 pub fn preview_features() -> String {
@@ -172,7 +218,7 @@ pub fn referential_actions(schema: String) -> String {
 /// type GetConfigResponse = GetConfigErrorResponse | GetConfigSuccessResponse
 ///
 /// ```
-pub fn get_config(get_config_params: String) -> Result<String, String> {
+pub fn get_config(get_config_params: String) -> String {
     get_config::get_config(&get_config_params)
 }
 
@@ -210,97 +256,4 @@ pub fn get_config(get_config_params: String) -> Result<String, String> {
 /// ```
 pub fn get_dmmf(get_dmmf_params: String) -> Result<String, String> {
     get_dmmf::get_dmmf(&get_dmmf_params)
-}
-
-/// The LSP position is expressed as a (line, col) tuple, but our pest-based parser works with byte
-/// offsets. This function converts from an LSP position to a pest byte offset. Returns `None` if
-/// the position has a line past the end of the document, or a character position past the end of
-/// the line.
-pub(crate) fn position_to_offset(position: &Position, document: &str) -> Option<usize> {
-    let mut offset = 0;
-    let mut line_offset = position.line;
-    let mut character_offset = position.character;
-    let mut chars = document.chars();
-
-    while line_offset > 0 {
-        loop {
-            match chars.next() {
-                Some('\n') => {
-                    offset += 1;
-                    break;
-                }
-                Some(_) => {
-                    offset += 1;
-                }
-                None => return Some(offset),
-            }
-        }
-
-        line_offset -= 1;
-    }
-
-    while character_offset > 0 {
-        match chars.next() {
-            Some('\n') | None => return Some(offset),
-            Some(_) => {
-                offset += 1;
-                character_offset -= 1;
-            }
-        }
-    }
-
-    Some(offset)
-}
-
-#[track_caller]
-/// Converts an LSP range to a span.
-pub(crate) fn range_to_span(range: Range, document: &str) -> ast::Span {
-    let start = position_to_offset(&range.start, document).unwrap();
-    let end = position_to_offset(&range.end, document).unwrap();
-
-    ast::Span::new(start, end, psl::parser_database::FileId::ZERO)
-}
-
-/// Gives the LSP position right after the given span.
-pub(crate) fn position_after_span(span: ast::Span, document: &str) -> Position {
-    offset_to_position(span.end - 1, document)
-}
-
-/// Converts a byte offset to an LSP position, if the given offset
-/// does not overflow the document.
-pub fn offset_to_position(offset: usize, document: &str) -> Position {
-    let mut position = Position::default();
-
-    for (i, chr) in document.chars().enumerate() {
-        match chr {
-            _ if i == offset => {
-                return position;
-            }
-            '\n' => {
-                position.character = 0;
-                position.line += 1;
-            }
-            _ => {
-                position.character += 1;
-            }
-        }
-    }
-
-    position
-}
-
-#[cfg(test)]
-mod tests {
-    use lsp_types::Position;
-
-    // On Windows, a newline is actually two characters.
-    #[test]
-    fn position_to_offset_with_crlf() {
-        let schema = "\r\nmodel Test {\r\n    id Int @id\r\n}";
-        // Let's put the cursor on the "i" in "id Int".
-        let expected_offset = schema.chars().position(|c| c == 'i').unwrap();
-        let found_offset = super::position_to_offset(&Position { line: 2, character: 4 }, schema).unwrap();
-
-        assert_eq!(found_offset, expected_offset);
-    }
 }

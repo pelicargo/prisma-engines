@@ -119,7 +119,7 @@ pub fn render_quaint_error(kind: &ErrorKind, connection_info: &ConnectionInfo) -
         },
 
         (ErrorKind::AuthenticationFailed { .. }, ConnectionInfo::External(_)) => default_value,
-        #[cfg(any(feature = "mysql-native", feature = "postgresql-native"))]
+        #[cfg(any(feature = "mysql-native", feature = "postgresql-native", feature = "mssql-native"))]
         (ErrorKind::AuthenticationFailed { user }, _) => match connection_info {
             ConnectionInfo::Native(NativeConnectionInfo::Postgres(url)) => {
                 Some(KnownError::new(common::IncorrectDatabaseCredentials {
@@ -133,11 +133,17 @@ pub fn render_quaint_error(kind: &ErrorKind, connection_info: &ConnectionInfo) -
                     database_host: url.host().to_owned(),
                 }))
             }
+            ConnectionInfo::Native(NativeConnectionInfo::Mssql(url)) => {
+                Some(KnownError::new(common::IncorrectDatabaseCredentials {
+                    database_user: format!("{user}"),
+                    database_host: url.host().to_owned(),
+                }))
+            }
             _ => unreachable!(),
         },
 
         (ErrorKind::SocketTimeout { .. }, ConnectionInfo::External(_)) => default_value,
-        #[cfg(any(feature = "mssql-native", feature = "mysql-native", feature = "postgresql-native"))]
+        #[cfg(any(feature = "mssql-native", feature = "mysql-native", feature = "postgresql-native", feature = "sqlite-native"))]
         (ErrorKind::SocketTimeout, _) => match connection_info {
             ConnectionInfo::Native(NativeConnectionInfo::Postgres(url)) => {
                 let time = match url.socket_timeout() {
@@ -173,6 +179,15 @@ pub fn render_quaint_error(kind: &ErrorKind, connection_info: &ConnectionInfo) -
                     time,
                     context: "Socket timeout (the database failed to respond to a query within the configured timeout — see https://pris.ly/d/postgres-connector for more details.)."
                         .into(),
+                }))
+            }
+            ConnectionInfo::Native(NativeConnectionInfo::Sqlite { file_path, db_name: _ }) => {
+                Some(KnownError::new(common::DatabaseOperationTimeout {
+                    time: "N/A".into(),
+                    context: format!(
+                        "The database failed to respond to a query within the configured timeout — see https://pris.ly/d/sqlite-connector for more details. Database: {}",
+                        file_path
+                    ),
                 }))
             }
             _ => unreachable!(),
